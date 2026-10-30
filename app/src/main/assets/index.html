@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Nifty Live Option Chain + Alarm</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a; color: #e2e8f0; padding: 20px; min-height: 100vh;
+    }
+    .header { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-bottom: 20px; }
+    h1 { font-size: 1.45rem; color: #38bdf8; }
+    .badge { background: #1e293b; padding: 6px 12px; border-radius: 8px; font-size: 0.9rem; }
+    .live { color: #4ade80; }
+    .cards {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px; margin-bottom: 16px;
+    }
+    .card {
+      background: #1e293b; border-radius: 12px; padding: 14px; text-align: center;
+    }
+    .card .label { font-size: 0.78rem; color: #94a3b8; margin-bottom: 4px; }
+    .card .value { font-size: 1.15rem; font-weight: 700; }
+    .positive { color: #4ade80; }
+    .negative { color: #f87171; }
+    .alarm-box {
+      background: #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 16px;
+      display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+    }
+    .alarm-box label { font-size: 0.85rem; color: #94a3b8; }
+    .alarm-box input {
+      background: #0f172a; border: 1px solid #334155; color: #e2e8f0;
+      padding: 8px 10px; border-radius: 8px; width: 90px; font-size: 1rem;
+    }
+    .alarm-status {
+      padding: 6px 14px; border-radius: 20px; font-weight: 600; font-size: 0.9rem;
+    }
+    .alarm-off { background: #334155; color: #94a3b8; }
+    .alarm-on  { background: #7f1d1d; color: #fca5a5; animation: pulse 1s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+    button {
+      background: #334155; color: #e2e8f0; border: none;
+      padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 0.9rem;
+    }
+    button:hover { background: #475569; }
+    .btn-stop { background: #7f1d1d !important; color: #fca5a5 !important; }
+    table { width: 100%; border-collapse: collapse; background: #1e293b; font-size: 0.88rem; }
+    th {
+      background: #0f172a; padding: 10px 6px; text-align: center; color: #94a3b8;
+      font-weight: 600; position: sticky; top: 0;
+    }
+    td { padding: 7px 6px; text-align: center; border-top: 1px solid #334155; }
+    tr:hover { background: #334155; }
+    .strike { font-weight: 700; color: #38bdf8; background: #0f172a; }
+    .atm { background: #1e3a5f !important; }
+    .table-wrap { max-height: 55vh; overflow-y: auto; border-radius: 12px; margin-bottom: 16px; }
+    #alarmNotify {
+      display: none; background: #7f1d1d; border: 2px solid #f87171;
+      border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; animation: pulse 1.2s infinite;
+    }
+    #alarmNotify.show { display: block; }
+    #alarmNotify h3 { color: #fca5a5; margin-bottom: 12px; font-size: 1.1rem; }
+    #alarmNotify .notify-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px;
+    }
+    #alarmNotify .notify-item {
+      background: #450a0a; border-radius: 8px; padding: 10px; text-align: center;
+    }
+    #alarmNotify .nlabel { font-size: 0.75rem; color: #fca5a5; margin-bottom: 4px; }
+    #alarmNotify .nvalue { font-size: 1.1rem; font-weight: 700; color: #fff; }
+    #historyBox {
+      background: #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 16px;
+    }
+    #historyBox h3 {
+      color: #38bdf8; margin-bottom: 12px; font-size: 1.05rem;
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;
+    }
+    #historyBox .hist-wrap { max-height: 260px; overflow-y: auto; border-radius: 8px; }
+    #historyBox table { font-size: 0.8rem; }
+    .footer { margin-top: 12px; font-size: 0.8rem; color: #64748b; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Nifty Live Option Chain</h1>
+    <div class="badge">Spot: <span id="spot">—</span></div>
+    <div class="badge">Expiry: <span id="expiry">—</span></div>
+    <div class="badge live" id="lastUpdate">Connecting...</div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="label">Call Investment</div><div class="value" id="callInv">—</div></div>
+    <div class="card"><div class="label">Put Investment</div><div class="value" id="putInv">—</div></div>
+    <div class="card"><div class="label">Total Investment</div><div class="value" id="totalInv">—</div></div>
+    <div class="card"><div class="label">% Difference</div><div class="value" id="pctDiff">—</div></div>
+    <div class="card">
+      <div class="label">% Diff Max</div>
+      <div class="value positive" id="pctDiffMax">—</div>
+    </div>
+    <div class="card">
+      <div class="label">% Diff Min</div>
+      <div class="value negative" id="pctDiffMin">—</div>
+    </div>
+    <div class="card" style="display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;">
+      <div class="label">Reset extremes</div>
+      <button type="button" onclick="resetPctExtremes()" style="background:#2563eb;color:#fff;padding:10px 16px;font-weight:600;">
+        Reset Max / Min
+      </button>
+    </div>
+    <div class="card"><div class="label">PCR</div><div class="value" id="pcr">—</div></div>
+    <div class="card"><div class="label">Max Pain</div><div class="value" id="maxPain">—</div></div>
+  </div>
+
+  <div class="cards">
+    <div class="card"><div class="label">Prev Close</div><div class="value" id="prevClose">—</div></div>
+    <div class="card"><div class="label">Open</div><div class="value" id="dayOpen">—</div></div>
+    <div class="card"><div class="label">High</div><div class="value" id="dayHigh">—</div></div>
+    <div class="card"><div class="label">Low</div><div class="value" id="dayLow">—</div></div>
+    <div class="card"><div class="label">Nifty Change</div><div class="value" id="niftyChg">—</div></div>
+  </div>
+
+  <div class="alarm-box">
+    <div>
+      <label>Upper limit (% Diff &gt;)</label>
+      <input type="number" id="upperLimit" value="50" step="1">
+      <span style="color:#94a3b8">%</span>
+    </div>
+    <div>
+      <label>Lower limit (% Diff &lt;)</label>
+      <input type="number" id="lowerLimit" value="-50" step="1">
+      <span style="color:#94a3b8">%</span>
+    </div>
+    <div class="alarm-status alarm-off" id="alarmStatus">Alarm: OFF</div>
+    <span style="color:#64748b;font-size:0.8rem;">Also alarms on new % Diff Max / Min</span>
+    <button onclick="testSound()">Test Sound</button>
+    <button class="btn-stop" onclick="stopAlarm()">Stop Alarm</button>
+    <button type="button" onclick="resetPctExtremes()" style="background:#2563eb;color:#fff;font-weight:600;">Reset Max / Min</button>
+    <span id="soundStatus" style="color:#94a3b8;font-size:0.85rem;">Click Test Sound once to enable audio</span>
+  </div>
+
+  <div id="alarmNotify">
+    <h3>⚠ ALARM TRIGGERED — Snapshot</h3>
+    <div class="notify-grid">
+      <div class="notify-item"><div class="nlabel">Spot</div><div class="nvalue" id="nSpot">—</div></div>
+      <div class="notify-item"><div class="nlabel">ATM Strike</div><div class="nvalue" id="nAtmStrike">—</div></div>
+      <div class="notify-item"><div class="nlabel">ATM Call LTP</div><div class="nvalue" id="nAtmCall">—</div></div>
+      <div class="notify-item"><div class="nlabel">ATM Put LTP</div><div class="nvalue" id="nAtmPut">—</div></div>
+      <div class="notify-item"><div class="nlabel">Total Investment</div><div class="nvalue" id="nTotalInv">—</div></div>
+      <div class="notify-item"><div class="nlabel">PCR</div><div class="nvalue" id="nPcr">—</div></div>
+      <div class="notify-item"><div class="nlabel">Max Pain</div><div class="nvalue" id="nMaxPain">—</div></div>
+      <div class="notify-item"><div class="nlabel">% Difference</div><div class="nvalue" id="nPctDiff">—</div></div>
+      <div class="notify-item"><div class="nlabel">Nifty Change</div><div class="nvalue" id="nNiftyChg">—</div></div>
+      <div class="notify-item"><div class="nlabel">Time</div><div class="nvalue" id="nTime">—</div></div>
+    </div>
+  </div>
+
+  <div id="historyBox">
+    <h3>
+      <span>Saved Alarm Notifications (<span id="histCount">0</span>)</span>
+      <span>
+        <button type="button" onclick="exportHistory()">Export CSV</button>
+        <button type="button" onclick="deleteSelectedHistory()" class="btn-stop">Delete Selected</button>
+        <button type="button" class="btn-stop" onclick="clearHistory()">Clear All</button>
+      </span>
+    </h3>
+    <div class="hist-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="histSelectAll" onclick="toggleSelectAll(this)" title="Select all"></th>
+            <th>Time</th><th>Side</th><th>Spot</th><th>ATM Strike</th><th>ATM Call LTP</th><th>ATM Put LTP</th>
+            <th>Total Inv</th><th>PCR</th><th>Max Pain</th><th>% Diff</th><th>Nifty Chg</th>
+          </tr>
+        </thead>
+        <tbody id="histBody">
+          <tr><td colspan="12" style="color:#64748b;">No alarms saved yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Call OI</th><th>Call LTP</th><th>Strike</th><th>Put LTP</th><th>Put OI</th>
+        </tr>
+      </thead>
+      <tbody id="chainBody">
+        <tr><td colspan="5">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="footer">Android app • AlgoStraddle + Yahoo • Auto-refresh 5s • No login</div>
+
+<script>
+  let lastData = null;
+  let pctDiffMax = null, pctDiffMin = null, pctDiffMaxSpot = null, pctDiffMinSpot = null;
+  let alarmActive = false, beepTimer = null, audioCtx = null, lastAlarmState = false;
+  let alarmHistory = [];
+  let alarmMutedUntil = 0;  // timestamp: no auto-alarm until this time
+  let lastUpperLimit = null;
+  let lastLowerLimit = null;
+
+  try {
+    const mx = localStorage.getItem('niftyPctDiffMax');
+    const mn = localStorage.getItem('niftyPctDiffMin');
+    const mxs = localStorage.getItem('niftyPctDiffMaxSpot');
+    const mns = localStorage.getItem('niftyPctDiffMinSpot');
+    const dayKey = localStorage.getItem('niftyPctDiffDay');
+    const today = new Date().toDateString();
+    // Reset max/min each new calendar day so values track today's session
+    if (dayKey !== today) {
+      localStorage.removeItem('niftyPctDiffMax');
+      localStorage.removeItem('niftyPctDiffMin');
+      localStorage.removeItem('niftyPctDiffMaxSpot');
+      localStorage.removeItem('niftyPctDiffMinSpot');
+      localStorage.setItem('niftyPctDiffDay', today);
+    } else {
+      if (mx !== null && isFinite(parseFloat(mx))) pctDiffMax = parseFloat(mx);
+      if (mn !== null && isFinite(parseFloat(mn))) pctDiffMin = parseFloat(mn);
+      if (mxs !== null && isFinite(parseFloat(mxs))) pctDiffMaxSpot = parseFloat(mxs);
+      if (mns !== null && isFinite(parseFloat(mns))) pctDiffMinSpot = parseFloat(mns);
+    }
+    const saved = localStorage.getItem('niftyAlarmHistory');
+    if (saved) alarmHistory = JSON.parse(saved);
+  } catch (e) {}
+
+  function ensureAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      return true;
+    } catch (e) { return false; }
+  }
+
+  function singleBeep() {
+    if (!audioCtx) return;
+    const t0 = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.type = 'square'; osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.4, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.22);
+    osc.start(t0); osc.stop(t0 + 0.28);
+  }
+
+  function startContinuousAlarm() {
+    if (alarmActive) return;
+    if (!ensureAudio()) return;
+    alarmActive = true;
+    singleBeep();
+    beepTimer = setInterval(singleBeep, 600);
+    updateAlarmUI(true);
+    showAlarmNotification();
+  }
+
+  function stopAlarm() {
+    alarmActive = false;
+    if (beepTimer) { clearInterval(beepTimer); beepTimer = null; }
+    lastAlarmState = false;
+    updateAlarmUI(false);
+    const box = document.getElementById('alarmNotify');
+    if (box) box.classList.remove('show');
+  }
+
+  function updateAlarmUI(isOn) {
+    const statusEl = document.getElementById('alarmStatus');
+    const upper = document.getElementById('upperLimit').value;
+    const lower = document.getElementById('lowerLimit').value;
+    if (isOn) {
+      statusEl.textContent = 'ALARM ACTIVE — beeping';
+      statusEl.className = 'alarm-status alarm-on';
+    } else if (Date.now() < alarmMutedUntil) {
+      const sec = Math.ceil((alarmMutedUntil - Date.now()) / 1000);
+      const m = Math.floor(sec / 60), s = sec % 60;
+      statusEl.textContent = 'Alarm muted ' + m + 'm ' + s + 's (or change limits)';
+      statusEl.className = 'alarm-status alarm-off';
+    } else {
+      statusEl.textContent = 'Alarm: OFF (>' + upper + '% or <' + lower + '%)';
+      statusEl.className = 'alarm-status alarm-off';
+    }
+  }
+
+  function testSound() {
+    ensureAudio();
+    singleBeep();
+    setTimeout(singleBeep, 300);
+    document.getElementById('soundStatus').textContent = 'Sound enabled ✓';
+  }
+
+  document.addEventListener('click', function once() {
+    ensureAudio();
+    document.removeEventListener('click', once);
+  }, { once: true });
+
+  function formatOI(n) {
+    if (n >= 10000000) return (n / 10000000).toFixed(2) + ' Cr';
+    if (n >= 100000) return (n / 100000).toFixed(2) + ' L';
+    return Number(n).toLocaleString();
+  }
+
+  function formatMoney(n) {
+    if (n == null) return '—';
+    if (n >= 10000000) return '₹' + (n / 10000000).toFixed(2) + ' Cr';
+    if (n >= 100000) return '₹' + (n / 100000).toFixed(2) + ' L';
+    return '₹' + Number(n).toLocaleString();
+  }
+
+  function resetPctExtremes() {
+    try {
+      if (!window.confirm('Are you sure you want to reset % Diff Max and % Diff Min?')) return;
+    } catch (e) {
+      return;
+    }
+    pctDiffMax = null;
+    pctDiffMin = null;
+    pctDiffMaxSpot = null;
+    pctDiffMinSpot = null;
+    window._pctResetToken = Date.now();
+    try {
+      localStorage.removeItem('niftyPctDiffMax');
+      localStorage.removeItem('niftyPctDiffMin');
+      localStorage.removeItem('niftyPctDiffMaxSpot');
+      localStorage.removeItem('niftyPctDiffMinSpot');
+      localStorage.setItem('niftyPctDiffDay', new Date().toDateString());
+    } catch (e) {}
+    var maxEl = document.getElementById('pctDiffMax');
+    var minEl = document.getElementById('pctDiffMin');
+    if (maxEl) maxEl.textContent = '—';
+    if (minEl) minEl.textContent = '—';
+  }
+
+  function showAlarmNotification() {
+    const box = document.getElementById('alarmNotify');
+    if (!box || !lastData) return;
+    box.classList.add('show');
+
+    let atm = lastData.chain.find(function(r) { return r.is_atm; });
+    if (!atm && lastData.chain.length) {
+      let best = lastData.chain[0], bestDiff = Math.abs(best.strike - lastData.spot);
+      lastData.chain.forEach(function(r) {
+        const d = Math.abs(r.strike - lastData.spot);
+        if (d < bestDiff) { best = r; bestDiff = d; }
+      });
+      atm = best;
+    }
+
+    document.getElementById('nSpot').textContent = Number(lastData.spot).toLocaleString('en-IN', {maximumFractionDigits: 1});
+    document.getElementById('nAtmStrike').textContent = atm ? atm.strike : '—';
+    document.getElementById('nAtmCall').textContent = atm ? Number(atm.call_ltp).toFixed(2) : '—';
+    document.getElementById('nAtmPut').textContent = atm ? Number(atm.put_ltp).toFixed(2) : '—';
+    document.getElementById('nTotalInv').textContent = formatMoney(lastData.total_investment);
+    document.getElementById('nPcr').textContent = Number(lastData.pcr).toFixed(2);
+    document.getElementById('nMaxPain').textContent = lastData.max_pain ? Number(lastData.max_pain).toLocaleString() : '—';
+    const pct = lastData.pct_diff;
+    document.getElementById('nPctDiff').textContent = (pct >= 0 ? '+' : '') + Number(pct).toFixed(2) + '%';
+
+    if (lastData.nifty_change != null) {
+      const nc = lastData.nifty_change, np = lastData.nifty_change_pct;
+      let ntxt = (nc >= 0 ? '+' : '') + Number(nc).toFixed(2);
+      if (np != null) ntxt += ' (' + (np >= 0 ? '+' : '') + Number(np).toFixed(2) + '%)';
+      document.getElementById('nNiftyChg').textContent = ntxt;
+    } else {
+      document.getElementById('nNiftyChg').textContent = '—';
+    }
+
+    const ts = new Date().toLocaleString('en-IN');
+    document.getElementById('nTime').textContent = ts;
+
+    const upper = parseFloat(document.getElementById('upperLimit').value);
+    const lower = parseFloat(document.getElementById('lowerLimit').value);
+    let breachSide = window._lastBreachReason || '';
+    if (!breachSide) {
+      if (pct > upper) breachSide = 'UPPER';
+      else if (pct < lower) breachSide = 'LOWER';
+    }
+    const entry = {
+      time: ts,
+      side: breachSide,
+      spot: lastData.spot,
+      atmStrike: atm ? atm.strike : null,
+      atmCall: atm ? atm.call_ltp : null,
+      atmPut: atm ? atm.put_ltp : null,
+      totalInv: lastData.total_investment,
+      pcr: lastData.pcr,
+      maxPain: lastData.max_pain,
+      pctDiff: pct,
+      niftyChg: lastData.nifty_change != null ? lastData.nifty_change : null
+    };
+    const last = alarmHistory[0];
+    if (!last || last.time !== ts) {
+      alarmHistory.unshift(entry);
+      if (alarmHistory.length > 200) alarmHistory.pop();
+      try { localStorage.setItem('niftyAlarmHistory', JSON.stringify(alarmHistory)); } catch (e) {}
+      renderHistory();
+    }
+  }
+
+  function renderHistory() {
+    const tbody = document.getElementById('histBody');
+    document.getElementById('histCount').textContent = alarmHistory.length;
+    if (!alarmHistory.length) {
+      tbody.innerHTML = '<tr><td colspan="12" style="color:#64748b;">No alarms saved yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = alarmHistory.map(function(e, idx) {
+      return '<tr>' +
+        '<td><input type="checkbox" class="histCheck" data-idx="' + idx + '"></td>' +
+        '<td>' + e.time + '</td>' +
+        '<td>' + (e.side || '—') + '</td>' +
+        '<td>' + Number(e.spot).toLocaleString('en-IN', {maximumFractionDigits: 1}) + '</td>' +
+        '<td>' + (e.atmStrike != null ? e.atmStrike : '—') + '</td>' +
+        '<td>' + (e.atmCall != null ? Number(e.atmCall).toFixed(2) : '—') + '</td>' +
+        '<td>' + (e.atmPut != null ? Number(e.atmPut).toFixed(2) : '—') + '</td>' +
+        '<td>' + formatMoney(e.totalInv) + '</td>' +
+        '<td>' + (e.pcr != null ? Number(e.pcr).toFixed(2) : '—') + '</td>' +
+        '<td>' + (e.maxPain != null ? Number(e.maxPain).toLocaleString() : '—') + '</td>' +
+        '<td>' + ((e.pctDiff >= 0 ? '+' : '') + Number(e.pctDiff).toFixed(2)) + '%</td>' +
+        '<td>' + (e.niftyChg != null ? ((e.niftyChg >= 0 ? '+' : '') + Number(e.niftyChg).toFixed(2)) : '—') + '</td>' +
+      '</tr>';
+    }).join('');
+    var sa = document.getElementById('histSelectAll');
+    if (sa) sa.checked = false;
+  }
+
+  function toggleSelectAll(master) {
+    var boxes = document.querySelectorAll('.histCheck');
+    for (var i = 0; i < boxes.length; i++) boxes[i].checked = master.checked;
+  }
+
+  function deleteSelectedHistory() {
+    var boxes = document.querySelectorAll('.histCheck:checked');
+    if (!boxes.length) {
+      alert('Select at least one alert to delete');
+      return;
+    }
+    if (!confirm('Delete ' + boxes.length + ' selected alert(s)?')) return;
+    var remove = {};
+    for (var i = 0; i < boxes.length; i++) {
+      remove[parseInt(boxes[i].getAttribute('data-idx'), 10)] = true;
+    }
+    alarmHistory = alarmHistory.filter(function(_e, idx) { return !remove[idx]; });
+    try { localStorage.setItem('niftyAlarmHistory', JSON.stringify(alarmHistory)); } catch (e) {}
+    renderHistory();
+  }
+
+  function clearHistory() {
+    if (!confirm('Clear all saved alarm notifications?')) return;
+    alarmHistory = [];
+    try { localStorage.removeItem('niftyAlarmHistory'); } catch (e) {}
+    renderHistory();
+  }
+
+  function exportHistory() {
+    if (!alarmHistory.length) { alert('No history to export'); return; }
+    const headers = ['Time','Side','Spot','ATM Strike','ATM Call LTP','ATM Put LTP','Total Investment','PCR','Max Pain','% Difference','Nifty Change'];
+    const rows = alarmHistory.map(function(e) {
+      return [e.time, e.side || '', e.spot, e.atmStrike, e.atmCall, e.atmPut, e.totalInv, e.pcr, e.maxPain, e.pctDiff, e.niftyChg].join(',');
+    });
+    const csv = [headers.join(',')].concat(rows).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'nifty_alarm_history.csv';
+    a.click();
+  }
+
+  async function fetchData() {
+    try {
+      const data = JSON.parse(await Android.fetchChain());
+      if (data.error) {
+        document.getElementById('lastUpdate').textContent = 'Error: ' + data.error;
+        return;
+      }
+      lastData = data;
+
+      document.getElementById('spot').textContent = Number(data.spot).toLocaleString('en-IN', {maximumFractionDigits: 1});
+      document.getElementById('expiry').textContent = data.expiry;
+      const sc = data.strike_count || (data.chain ? data.chain.length : 0);
+      document.getElementById('lastUpdate').textContent = 'Live • ' + new Date().toLocaleTimeString() + ' • ' + sc + ' strikes';
+
+      document.getElementById('callInv').textContent = formatMoney(data.call_investment);
+      document.getElementById('putInv').textContent = formatMoney(data.put_investment);
+      document.getElementById('totalInv').textContent = formatMoney(data.total_investment);
+
+      const pct = data.pct_diff;
+      const pctEl = document.getElementById('pctDiff');
+      pctEl.textContent = (pct >= 0 ? '+' : '') + Number(pct).toFixed(2) + '%';
+      pctEl.className = 'value ' + (pct >= 0 ? 'positive' : 'negative');
+
+      const spotNow = data.spot;
+      const pctNum = Number(pct);
+      let newMaxBreach = false;
+      let newMinBreach = false;
+
+      if (isFinite(pctNum)) {
+        // Detect NEW max/min BEFORE updating (skip very first sample)
+        if (pctDiffMax !== null && isFinite(pctDiffMax) && pctNum > pctDiffMax) {
+          newMaxBreach = true;
+        }
+        if (pctDiffMin !== null && isFinite(pctDiffMin) && pctNum < pctDiffMin) {
+          newMinBreach = true;
+        }
+
+        if (pctDiffMax === null || !isFinite(pctDiffMax) || pctNum > pctDiffMax) {
+          pctDiffMax = pctNum;
+          pctDiffMaxSpot = spotNow;
+          try {
+            localStorage.setItem('niftyPctDiffMax', String(pctDiffMax));
+            localStorage.setItem('niftyPctDiffMaxSpot', String(pctDiffMaxSpot));
+            localStorage.setItem('niftyPctDiffDay', new Date().toDateString());
+          } catch (e) {}
+        }
+        if (pctDiffMin === null || !isFinite(pctDiffMin) || pctNum < pctDiffMin) {
+          pctDiffMin = pctNum;
+          pctDiffMinSpot = spotNow;
+          try {
+            localStorage.setItem('niftyPctDiffMin', String(pctDiffMin));
+            localStorage.setItem('niftyPctDiffMinSpot', String(pctDiffMinSpot));
+            localStorage.setItem('niftyPctDiffDay', new Date().toDateString());
+          } catch (e) {}
+        }
+      }
+      if (pctDiffMax !== null && isFinite(pctDiffMax)) {
+        let maxTxt = (pctDiffMax >= 0 ? '+' : '') + Number(pctDiffMax).toFixed(2) + '%';
+        if (pctDiffMaxSpot != null) maxTxt += ' (' + Number(pctDiffMaxSpot).toLocaleString('en-IN', {maximumFractionDigits: 1}) + ')';
+        document.getElementById('pctDiffMax').textContent = maxTxt;
+      }
+      if (pctDiffMin !== null && isFinite(pctDiffMin)) {
+        let minTxt = (pctDiffMin >= 0 ? '+' : '') + Number(pctDiffMin).toFixed(2) + '%';
+        if (pctDiffMinSpot != null) minTxt += ' (' + Number(pctDiffMinSpot).toLocaleString('en-IN', {maximumFractionDigits: 1}) + ')';
+        document.getElementById('pctDiffMin').textContent = minTxt;
+      }
+
+      document.getElementById('pcr').textContent = Number(data.pcr).toFixed(2);
+      document.getElementById('maxPain').textContent = data.max_pain ? Number(data.max_pain).toLocaleString() : '—';
+
+      document.getElementById('prevClose').textContent = data.prev_close != null ? Number(data.prev_close).toFixed(2) : '—';
+      document.getElementById('dayOpen').textContent = data.open != null ? Number(data.open).toFixed(2) : '—';
+      document.getElementById('dayHigh').textContent = data.high != null ? Number(data.high).toFixed(2) : '—';
+      document.getElementById('dayLow').textContent = data.low != null ? Number(data.low).toFixed(2) : '—';
+      const chgEl = document.getElementById('niftyChg');
+      if (data.nifty_change != null) {
+        const chg = data.nifty_change, chgPct = data.nifty_change_pct || 0;
+        chgEl.textContent = (chg >= 0 ? '+' : '') + Number(chg).toFixed(2) + ' (' + (chgPct >= 0 ? '+' : '') + Number(chgPct).toFixed(2) + '%)';
+        chgEl.className = 'value ' + (chg >= 0 ? 'positive' : 'negative');
+      } else {
+        chgEl.textContent = '—';
+      }
+
+      const upper = parseFloat(document.getElementById('upperLimit').value);
+      const lower = parseFloat(document.getElementById('lowerLimit').value);
+
+      // New limits cancel the 5-min mute
+      if (lastUpperLimit === null) lastUpperLimit = upper;
+      if (lastLowerLimit === null) lastLowerLimit = lower;
+      if (upper !== lastUpperLimit || lower !== lastLowerLimit) {
+        alarmMutedUntil = 0;
+        lastUpperLimit = upper;
+        lastLowerLimit = lower;
+      }
+
+      // Alarm: upper/lower limits OR new % Diff Max OR new % Diff Min
+      const limitBreach = (pct > upper) || (pct < lower);
+      const extremeBreach = newMaxBreach || newMinBreach;
+      const alarmOn = limitBreach || extremeBreach;
+      const muted = Date.now() < alarmMutedUntil;
+
+      // Store reason for history
+      window._lastBreachReason = null;
+      if (newMaxBreach) window._lastBreachReason = 'NEW_MAX';
+      else if (newMinBreach) window._lastBreachReason = 'NEW_MIN';
+      else if (pct > upper) window._lastBreachReason = 'UPPER';
+      else if (pct < lower) window._lastBreachReason = 'LOWER';
+
+      if (alarmOn && !muted) {
+        if (!alarmActive) {
+          startContinuousAlarm();
+          alarmMutedUntil = Date.now() + 5 * 60 * 1000;
+        }
+        lastAlarmState = true;
+      } else {
+        if (!alarmActive) updateAlarmUI(false);
+        lastAlarmState = false;
+      }
+
+      const tbody = document.getElementById('chainBody');
+      tbody.innerHTML = '';
+      (data.chain || []).forEach(function(row) {
+        const tr = document.createElement('tr');
+        if (row.is_atm) tr.classList.add('atm');
+        tr.innerHTML =
+          '<td>' + formatOI(row.call_oi) + '</td>' +
+          '<td>' + Number(row.call_ltp).toFixed(2) + '</td>' +
+          '<td class="strike">' + row.strike + '</td>' +
+          '<td>' + Number(row.put_ltp).toFixed(2) + '</td>' +
+          '<td>' + formatOI(row.put_oi) + '</td>';
+        tbody.appendChild(tr);
+      });
+    } catch (err) {
+      document.getElementById('lastUpdate').textContent = 'Connection error';
+      console.error(err);
+    }
+  }
+
+  renderHistory();
+  fetchData();
+  setInterval(fetchData, 5000);
+  setInterval(function() {
+    if (!alarmActive && Date.now() < alarmMutedUntil) updateAlarmUI(false);
+  }, 1000);
+</script>
+</body>
+</html>
